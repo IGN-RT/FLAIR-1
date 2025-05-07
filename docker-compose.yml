@@ -1,0 +1,24 @@
+services:
+  flair:
+    build: .
+    volumes:
+      - flair_data:/app
+    shm_size: '10gb'
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 'all'
+              capabilities: [gpu]
+
+    stdin_open: true
+    tty: true
+
+volumes:
+  flair_data:
+    driver: local
+    driver_opts:
+      type: cifs
+      o: username=${IGN_USER},password=${PASSWORD},domain=IGN,file_mode=0777,dir_mode=0777
+      device: //10.13.90.180/proyecto_rt$/DOCKER_VOLUMES/FLAIR
