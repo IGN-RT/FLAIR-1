@@ -1,6 +1,8 @@
 services:
   flair:
-    build: .
+    build:
+      context: ./
+      dockerfile: Dockerfile-dev
     volumes:
       - .:/app
     shm_size: '10gb'
