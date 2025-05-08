@@ -2,14 +2,12 @@ FROM python:3.10
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y git && \
-    rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir build
 
-RUN git clone https://github.com/IGN-RT/FLAIR-1.git
+COPY . /app
 
-WORKDIR FLAIR-1
+RUN python -m build
 
-RUN pip install -e .
+RUN pip install --no-cache-dir dist/*.whl
 
 CMD ["/bin/bash"]
