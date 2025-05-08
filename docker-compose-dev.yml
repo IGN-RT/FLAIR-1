@@ -1,0 +1,9 @@
+services:
+  flair:
+    build: .
+    volumes:
+      - .:/app
+    shm_size: '10gb'
+
+    stdin_open: true
+    tty: true

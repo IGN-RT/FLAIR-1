@@ -1,0 +1,14 @@
+.git
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.ipynb
+*.log
+*.csv
+*.png
+*.jpg
+*.pt
+*.onnx
+*.h5
+.env
