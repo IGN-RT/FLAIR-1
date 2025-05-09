@@ -1,13 +1,23 @@
-FROM python:3.10
+FROM python:3.10 AS builder
 
 WORKDIR /app
 
 RUN pip install --no-cache-dir build
 
-COPY . /app
+COPY setup.py .
+COPY src/ ./src   
 
 RUN python -m build
 
-RUN pip install --no-cache-dir dist/*.whl
+
+FROM python:3.10
+
+WORKDIR /app
+
+COPY --from=builder /app/dist/*.whl ./dist/
+
+RUN pip install --no-cache-dir ./dist/*.whl && \
+    rm -rf /root/.cache
 
 CMD ["/bin/bash"]
+
