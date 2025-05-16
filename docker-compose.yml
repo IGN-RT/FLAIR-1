@@ -2,7 +2,9 @@ services:
   flair:
     build: .
     volumes:
-      - flair_data:/app
+      - flair_input:/app/input
+      - flair_output:/app/output
+      - flair_configs:/app/configs
     shm_size: '10gb'
     deploy:
       resources:
@@ -11,14 +13,26 @@ services:
             - driver: nvidia
               count: 'all'
               capabilities: [gpu]
-
     stdin_open: true
     tty: true
 
 volumes:
-  flair_data:
+  flair_input:
     driver: local
     driver_opts:
       type: cifs
       o: username=${IGN_USER},password=${PASSWORD},domain=IGN,file_mode=0777,dir_mode=0777
-      device: //10.13.90.180/proyecto_rt$/DOCKER_VOLUMES/FLAIR
+      device: ${VOLUMES_BASE_PATH}/input
+  flair_output:
+    driver: local
+    driver_opts:
+      type: cifs
+      o: username=${IGN_USER},password=${PASSWORD},domain=IGN,file_mode=0777,dir_mode=0777
+      device: ${VOLUMES_BASE_PATH}/output
+  flair_configs:
+    driver: local
+    driver_opts:
+      type: cifs
+      o: username=${IGN_USER},password=${PASSWORD},domain=IGN,file_mode=0777,dir_mode=0777
+      device: ${VOLUMES_BASE_PATH}/configs
+
