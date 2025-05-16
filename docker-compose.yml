@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   flair:
     build: .
@@ -24,17 +22,17 @@ volumes:
     driver_opts:
       type: cifs
       o: username=${IGN_USER},password=${PASSWORD},domain=IGN,file_mode=0777,dir_mode=0777
-      device: //10.13.90.180/proyecto_rt$/DOCKER_VOLUMES/FLAIR/input
+      device: ${VOLUMES_BASE_PATH}/input
   flair_output:
     driver: local
     driver_opts:
       type: cifs
       o: username=${IGN_USER},password=${PASSWORD},domain=IGN,file_mode=0777,dir_mode=0777
-      device: //10.13.90.180/proyecto_rt$/DOCKER_VOLUMES/FLAIR/output
+      device: ${VOLUMES_BASE_PATH}/output
   flair_configs:
     driver: local
     driver_opts:
       type: cifs
       o: username=${IGN_USER},password=${PASSWORD},domain=IGN,file_mode=0777,dir_mode=0777
-      device: //10.13.90.180/proyecto_rt$/DOCKER_VOLUMES/FLAIR/configs
+      device: ${VOLUMES_BASE_PATH}/configs
 

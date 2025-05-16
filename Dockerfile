@@ -10,7 +10,7 @@ COPY src/ ./src
 RUN python -m build
 
 
-FROM python:3.10
+FROM python:3.10-slim
 
 WORKDIR /app
 
