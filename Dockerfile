@@ -1,15 +1,23 @@
+FROM python:3.10 AS builder
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir build
+
+COPY setup.py .
+COPY src/ ./src   
+
+RUN python -m build
+
+
 FROM python:3.10
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y git && \
-    rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/dist/*.whl ./dist/
 
-RUN git clone https://github.com/IGN-RT/FLAIR-1.git
-
-WORKDIR FLAIR-1
-
-RUN pip install -e .
+RUN pip install --no-cache-dir ./dist/*.whl && \
+    rm -rf /root/.cache
 
 CMD ["/bin/bash"]
+

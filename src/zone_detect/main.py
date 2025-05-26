@@ -1,28 +1,29 @@
-import os, sys
+import argparse
 import datetime
+import os
+import sys
 import warnings
-import torch
-import rasterio
-import yaml
-
 from pathlib import Path
-import argparse 
-from torch.utils.data import DataLoader
-from pytorch_lightning.utilities.rank_zero import rank_zero_only  
+
+import rasterio
+import torch
+import yaml
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from rasterio.features import geometry_window
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.zone_detect.slicing_job import slice_extent, create_polygon_from_bounds
-from src.zone_detect.model import load_model
 from src.zone_detect.dataset import Sliced_Dataset, convert
-
+from src.zone_detect.model import load_model
+from src.zone_detect.slicing_job import (create_polygon_from_bounds,
+                                         slice_extent)
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 #### CONF FILE
 argParser = argparse.ArgumentParser()
 argParser.add_argument("--conf", help="Path to the .yaml config file")
-
+argParser.add_argument("--batch-mode", action='store_true', help="Run over all images in input_img_path directory")
 
 @rank_zero_only
 class Logger(object):
@@ -45,8 +46,7 @@ def read_config(file_path):
 
 
 
-def setup(args):
-    config = read_config(args.conf)
+def setup(config):
     use_gpu = (False if torch.cuda.is_available() is False else config['use_gpu'])
     device = torch.device("cuda" if use_gpu else "cpu")
 
@@ -79,6 +79,76 @@ def setup(args):
         print(f"Something went wrong during detection configuration: {error}")
 
 
+def run_inference(config, path_out, device, use_gpu):
+    log_filename = os.path.join(config['output_path'], f"{config['output_name']}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    sys.stdout = Logger(filename=log_filename)
+    sys.stderr = sys.stdout
+    print(f"    [LOGGER] Writing logs to: {log_filename}")
+
+    input_img_path = config['input_img_path']
+    channels = config['channels']
+    img_pixels_detection = config['img_pixels_detection']
+    norma_task = config['norma_task']
+    batch_size = config['batch_size']
+    num_worker = config['num_worker']
+    output_type = config['output_type']
+    margin = config['margin']
+    n_classes = config['n_classes']
+
+    sliced_dataframe, profile, resolution, model = prepare(config, device)
+
+    dataset = Sliced_Dataset(
+        dataframe=sliced_dataframe,
+        img_path=input_img_path,
+        resolution=resolution,
+        bands=channels,
+        patch_detection_size=img_pixels_detection,
+        norma_dict=norma_task,
+    )
+
+    out_overall_profile = profile.copy()
+    out_overall_profile.update({
+        'dtype':'uint8', 'compress':'LZW', 'photometric': 'MINISBLACK',
+        'driver':'GTiff', 'BIGTIFF':'YES', 'tiled':True,
+        'blockxsize':img_pixels_detection, 'blockysize':img_pixels_detection
+    })
+    out_overall_profile['count'] = 1 if output_type == 'argmax' else n_classes
+    out = rasterio.open(path_out, 'w+', **out_overall_profile)
+
+    data_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_worker, pin_memory=True)
+
+    print(f"    [ ] starting inference...\n")
+    for samples in tqdm(data_loader):
+        imgs = samples["image"].to(device, non_blocking=(device.type == "cuda"))
+        if use_gpu:
+            torch.cuda.synchronize()
+        with torch.no_grad():
+            logits = model(imgs)
+            if config['model_framework']['model_provider'] == 'HuggingFace':
+                logits = logits.logits
+            logits.to(device)
+        predictions = torch.softmax(logits, dim=1).cpu().numpy()
+        indices = samples["index"].cpu().numpy()
+
+        for prediction, index in zip(predictions, indices):
+            prediction = prediction[:, margin:-margin, margin:-margin]
+            prediction = convert(prediction, output_type)
+            sliced_patch_bounds = create_polygon_from_bounds(
+                sliced_dataframe.at[index[0], 'left'],
+                sliced_dataframe.at[index[0], 'right'],
+                sliced_dataframe.at[index[0], 'bottom'],
+                sliced_dataframe.at[index[0], 'top']
+            )
+            window = geometry_window(out, [sliced_patch_bounds], pixel_precision=6).round_shape(op='ceil', pixel_precision=4)
+            if output_type == "argmax":
+                out.write(prediction, window=window)
+            else:
+                out.write_band([i for i in range(1, n_classes + 1)], prediction, window=window)
+
+    out.close()
+    dataset.close_raster()
+    print(f"\n[X] done writing to {path_out.split('/')[-1]} raster file.\n")
+    sys.stdout = sys.__stdout__
 
 
 
@@ -148,91 +218,26 @@ def prepare(config, device):
 
 
 def main():
-
-    # reading yaml
     args = argParser.parse_args()
-    config, path_out, device, use_gpu = setup(args)
+    config = read_config(args.conf)
 
-    log_filename = os.path.join(config['output_path'], f"{config['output_name']}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-    sys.stdout = Logger(filename=log_filename)
-    sys.stderr = sys.stdout
-    print(f"    [LOGGER] Writing logs to: {log_filename}")
+    if args.batch_mode:
+        assert not os.path.isfile(config['input_img_path']), "When using batch_mode, input image path has to be a directory, not a file"
+        input_dir = config['input_img_path']
+        image_list = [f for f in os.listdir(input_dir) if f.lower().endswith('.tif')]
 
-
-
-    input_img_path = config['input_img_path']
-    channels = config['channels']
-    img_pixels_detection = config['img_pixels_detection']
-    norma_task = config['norma_task']
-    batch_size = config['batch_size']    
-    num_worker = config['num_worker']
-    output_type = config['output_type']    
-    margin = config['margin']
-    n_classes = config['n_classes']
-
-    # slicing and model gathering
-    sliced_dataframe, profile, resolution, model = prepare(config, device)
-    
-    # get dataset 
-    dataset = Sliced_Dataset(dataframe=sliced_dataframe,
-                            img_path=input_img_path,
-                            resolution=resolution,
-                            bands=channels, 
-                            patch_detection_size=img_pixels_detection,
-                            norma_dict=norma_task,
-                            )    
-    
-    # prepare output raster
-    out_overall_profile = profile.copy()
-    out_overall_profile.update({'dtype':'uint8', 'compress':'LZW', 'photometric': 'MINISBLACK', 'driver':'GTiff', 'BIGTIFF':'YES', 'tiled':True, 
-                                'blockxsize':img_pixels_detection, 'blockysize':img_pixels_detection})
-    out_overall_profile['count'] = [1 if output_type == 'argmax' else n_classes][0]
-    out = rasterio.open(path_out, 'w+', **out_overall_profile)   
-    
-    # get Dataloader
-    data_loader = DataLoader(dataset,
-                             batch_size=batch_size,
-                             num_workers=num_worker,
-                             pin_memory=True,
-                             )
-    # inference loop
-    print(f"""    [ ] starting inference...\n""")
-    for samples in tqdm(data_loader):
-        imgs = samples["image"]
-        imgs = imgs.to(device, non_blocking=(device.type == "cuda"))
-        if use_gpu:
-            torch.cuda.synchronize()
-        with torch.no_grad():
-            logits = model(imgs)
-            if config['model_framework']['model_provider'] == 'HuggingFace':
-                logits = logits.logits
-            logits.to(device)
-        predictions = torch.softmax(logits, dim=1)
-        predictions = predictions.cpu().numpy()
-        indices = samples["index"].cpu().numpy()    
-
-        # writing windowed raster to output rastert 
-        for prediction, index in zip(predictions, indices):
-            # removing margins
-            prediction = prediction[:,0+margin:img_pixels_detection-margin,0+margin:img_pixels_detection-margin]
-            prediction = convert(prediction, output_type)
-            sliced_patch_bounds = create_polygon_from_bounds(sliced_dataframe.at[index[0], 'left'], sliced_dataframe.at[index[0], 'right'], 
-                                                             sliced_dataframe.at[index[0], 'bottom'], sliced_dataframe.at[index[0], 'top'])
-            window = geometry_window(out, [sliced_patch_bounds], pixel_precision=6)
-            window = window.round_shape(op='ceil', pixel_precision=4)
-            #write
-            if output_type == "argmax":
-                out.write(prediction, window=window)
-            else:
-                out.write_band([i for i in range(1, n_classes + 1)], prediction, window=window)      
-                
-    out.close()
-    dataset.close_raster()
-    print(f"""    
-                        
-    [X] done writing to {path_out.split('/')[-1]} raster file.\n""")
-
-    sys.stdout = sys.__stdout__ 
+        for img_file in image_list:
+            img_path = os.path.join(input_dir, img_file)
+            config['input_img_path'] = img_path
+            base_output_name = os.path.splitext(img_file)[0] + '.tif'
+            config['output_name'] = base_output_name
+            config, path_out, device, use_gpu = setup(config)
+            run_inference(config, path_out, device, use_gpu)
+    else:
+        assert config['input_img_path'].endswith('.tif'), "Input image path must be a TIF file"
+        assert config['output_name'] is not None, "Please, fill the field output_name."
+        config, path_out, device, use_gpu = setup(config)
+        run_inference(config, path_out, device, use_gpu)
 
 if __name__ == '__main__':
     main()         

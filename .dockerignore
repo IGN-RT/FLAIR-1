@@ -1,0 +1,41 @@
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build artifacts
+build/
+dist/
+.eggs/
+*.egg-info/
+*.egg
+
+# Data and model artifacts
+*.csv
+*.tif
+*.tiff
+*.png
+*.jpg
+*.pt
+*.onnx
+*.h5
+csv_full/
+csv_toy/
+
+# Jupyter notebooks and logs
+*.ipynb
+*.log
+
+# Environment and virtualenv files
+.env
+*.env
+.Python
+
+# Version control
+.git/
+.gitignore
+
+# Docker and Compose files (not needed in final image)
+Dockerfile*
+docker-compose*.yml

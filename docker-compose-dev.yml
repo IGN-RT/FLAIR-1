@@ -1,0 +1,11 @@
+services:
+  flair:
+    build:
+      context: ./
+      dockerfile: Dockerfile-dev
+    volumes:
+      - .:/app
+    shm_size: '10gb'
+
+    stdin_open: true
+    tty: true
